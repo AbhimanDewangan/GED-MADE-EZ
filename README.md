@@ -3,7 +3,7 @@
 Oman MoE study OS for Grades 9–12 (Basic Education → General Education Diploma).  
 Textbook-grounded tutor, Exam OS readiness, bilingual EN/ع lessons, and teacher class assignments — **not** a generic AI study / Khan clone.
 
-Built with **Next.js 15**, **React 19**, **Tailwind CSS**, and **Google OAuth + JWT** (same client as the CV Ingestion System — **not Firebase**).
+Built with **Next.js 15**, **React 19**, **Tailwind CSS**, and **Supabase Auth + Postgres**.
 
 ## What makes this different
 
@@ -20,7 +20,7 @@ Khan Academy has great general content. We help you pass **Oman MoE exams with y
 ## Features (shipped)
 
 - **Landing** — MoE positioning, proof routes (Library / Exams / Subjects / Classes), vs-Khan strip, product proofs (no fake score testimonials)
-- **Google sign-in** — OAuth via CV backend + JWT (see below)
+- **Email sign-in** — Supabase Auth (create account / sign in)
 - **Dashboard** — Live streak/mastery/readiness + first-run checklist
 - **Subjects** — Lessons with Start lesson → videos, notes, quiz
 - **Library** — MoE corpus + personal PDF indexing (RAG)
@@ -28,6 +28,7 @@ Khan Academy has great general content. We help you pass **Oman MoE exams with y
 - **Exam OS** — `/exams` practice + readiness breakdown
 - **Analytics / Planner** — Real activity-driven charts and tasks
 - **Classes / Teacher** — Join codes and assignments (`docs/teacher-classes.md`)
+- **Supabase database** — classrooms, learning progress, and sign-in analytics in Postgres
 
 ## Shared MoE textbook corpus (RAG)
 
@@ -59,34 +60,28 @@ npm install
 
 ### 2. Environment
 
-Copy `.env.example` → `.env.local`.
-
-**Auth (required for Google sign-in)** — same Google Client ID/Secret and redirect as CV:
+Copy `.env.example` → `.env.local` and set Supabase keys from your project dashboard:
 
 ```
-http://127.0.0.1:8000/api/auth/google/callback
+NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+SUPER_ADMIN_EMAIL=you@example.com
 ```
 
-Flow:
+In Supabase Auth settings:
 
-1. GED “Continue with Google” → CV backend `/api/auth/google/login?portal=ged`
-2. Google returns to CV’s callback on `:8000`
-3. CV redirects to `http://localhost:3000/auth/callback` with a JWT
-4. Normal CV logins (no `portal=ged`) still go to the CV frontend
+1. **Site URL** → `http://localhost:3000`
+2. **Redirect URLs** → `http://localhost:3000/auth/callback`
+3. Optionally turn **Confirm email** off for local development (Authentication → Sign In / Providers)
 
-Requirements:
-
-- CV backend on `http://127.0.0.1:8000`
-- `GED_FRONTEND_URL=http://localhost:3000` in the CV `.env`
-- `NEXT_PUBLIC_CV_AUTH_URL`, `GOOGLE_*`, `JWT_SECRET` in GED `.env.local` (see `.env.example`)
-
-**Optional LLM / embeddings** (tutor falls back to local hash embeddings + extractive answers if unset):
+### 3. Run
 
 ```bash
-# .env.local
-OPENAI_API_KEY=sk-...    # gpt-4o-mini + text-embedding-3-small
-GEMINI_API_KEY=...       # gemini-2.0-flash + text-embedding-004
+npm run dev
 ```
+
+Open [http://localhost:3000](http://localhost:3000). Create an account from `/auth/signin`.
 
 **Teacher role** (any one path — see `docs/teacher-classes.md`):
 
@@ -103,7 +98,7 @@ TEACHER_INVITE_CODE=oman-teachers-2026
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Keep the CV API running for Google login.
+Open [http://localhost:3000](http://localhost:3000). Create an account or sign in at `/auth/signin`.
 
 ## Bilingual learning (Oman)
 
@@ -111,12 +106,12 @@ Students set **Learning language** to English, العربية, or Mixed (default
 
 ## Teacher / class layer
 
-Teachers create classes with join codes; students join from the dashboard or `/classes`. Academic progress syncs to `data/classrooms.json` (no chat transcripts). See [docs/teacher-classes.md](docs/teacher-classes.md).
+Teachers create classes with join codes; students join from the dashboard or `/classes`. Academic progress syncs to Supabase (no chat transcripts). See [docs/teacher-classes.md](docs/teacher-classes.md).
 
 ## Stack
 
 - Next.js 15 (App Router) · React 19 · Tailwind CSS 4
-- Google OAuth + JWT (CV Ingestion System — **not Firebase**)
+- Supabase Auth (email/password) + Postgres
 - Framer Motion · Recharts · Lucide React
 - Optional OpenAI / Gemini for tutor generation + embeddings
 
@@ -126,13 +121,14 @@ Teachers create classes with join codes; students join from the dashboard or `/c
 src/
 ├── app/
 │   ├── page.tsx              # Landing
-│   ├── api/auth/             # Google OAuth + JWT
+│   ├── api/auth/             # Session / me / sign-in tracking
 │   ├── api/tutor/            # Grounded answer + embed (optional keys)
 │   ├── auth/                 # Sign-in + callback
 │   └── (app)/                # Dashboard, library, tutor, exams, …
 ├── components/landing/       # Landing sections
 ├── data/                     # Curriculum, exam bank, lessons, mock marketing copy
-└── lib/                      # Auth, RAG, user learning data, classrooms
+├── lib/supabase/             # Browser + server Supabase clients
+└── lib/                      # Auth, RAG, user learning, classrooms
 ```
 
 ## License

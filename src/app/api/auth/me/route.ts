@@ -3,6 +3,7 @@ import { isSuperAdminEmail } from "@/lib/admin";
 import { decodeAccessToken } from "@/lib/auth-server";
 import { loadClassroomStore } from "@/lib/classroom-store";
 import { resolveIsTeacher } from "@/lib/teacher";
+import { adoptLegacyLearningByEmail } from "@/lib/user-learning-store";
 
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -19,6 +20,10 @@ export async function GET(request: NextRequest) {
   try {
     const user = await decodeAccessToken(token);
     const store = await loadClassroomStore();
+
+    // One-time: attach prior JSON-era learning rows keyed by email/legacy id
+    void adoptLegacyLearningByEmail(user.id, user.email).catch(() => undefined);
+
     return NextResponse.json({
       user: {
         ...user,

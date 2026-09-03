@@ -1,33 +1,49 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import Link from "next/link";
-import { useAuth } from "@/lib/auth-context";
+import { createClient } from "@/lib/supabase/client";
+import { setToken } from "@/lib/auth-storage";
 import { Button } from "@/components/ui";
 
 function AuthCallbackInner() {
-  const searchParams = useSearchParams();
-  const { completeLogin } = useAuth();
+  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    const token = searchParams.get("token");
-
-    if (!token) {
-      setError("No authentication token received.");
-      return;
-    }
 
     void (async () => {
       try {
-        await completeLogin(token);
-        if (cancelled) return;
-        // Hard navigation avoids App Router + Strict Mode races that leave
-        // this page stuck on "Completing Google sign-in…" after a successful login.
-        window.location.replace("/dashboard");
+        const supabase = createClient();
+        const { data, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) throw sessionError;
+
+        if (data.session?.access_token) {
+          setToken(data.session.access_token);
+          if (!cancelled) window.location.replace("/dashboard");
+          return;
+        }
+
+        // Email confirmation / magic-link style codes in hash or query
+        const params = new URLSearchParams(window.location.search);
+        const code = params.get("code");
+        if (code) {
+          const { data: exchanged, error: exchangeError } =
+            await supabase.auth.exchangeCodeForSession(code);
+          if (exchangeError) throw exchangeError;
+          if (exchanged.session?.access_token) {
+            setToken(exchanged.session.access_token);
+            if (!cancelled) window.location.replace("/dashboard");
+            return;
+          }
+        }
+
+        if (!cancelled) {
+          setError("No active session. Please sign in again.");
+        }
       } catch {
         if (!cancelled) {
           setError("Failed to complete sign-in. Please try again.");
@@ -38,7 +54,7 @@ function AuthCallbackInner() {
     return () => {
       cancelled = true;
     };
-  }, [searchParams, completeLogin]);
+  }, [router]);
 
   if (error) {
     return (
@@ -53,8 +69,8 @@ function AuthCallbackInner() {
 
   return (
     <>
-      <Loader2 className="mx-auto mb-4 h-8 w-8 animate-spin text-indigo-400" />
-      <p className="text-white/80">Completing Google sign-in…</p>
+      <Loader2 className="mx-auto mb-4 h-8 w-8 animate-spin text-[var(--lp-green,#6ee7b7)]" />
+      <p className="text-white/80">Completing sign-in…</p>
     </>
   );
 }
@@ -66,8 +82,8 @@ export default function AuthCallbackPage() {
         <Suspense
           fallback={
             <>
-              <Loader2 className="mx-auto mb-4 h-8 w-8 animate-spin text-indigo-400" />
-              <p className="text-white/80">Completing Google sign-in…</p>
+              <Loader2 className="mx-auto mb-4 h-8 w-8 animate-spin text-[var(--lp-green,#6ee7b7)]" />
+              <p className="text-white/80">Completing sign-in…</p>
             </>
           }
         >

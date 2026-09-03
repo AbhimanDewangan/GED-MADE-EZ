@@ -1,5 +1,4 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
+import { createServiceClient } from "@/lib/supabase/server";
 
 export type SignInUser = {
   id: string;
@@ -19,50 +18,41 @@ export type SignInEvent = {
   at: string;
 };
 
-export type SignInStore = {
-  users: Record<string, SignInUser>;
-  events: SignInEvent[];
-};
-
-const STORE_PATH = path.join(process.cwd(), "data", "google-signins.json");
-
-async function ensureStore(): Promise<SignInStore> {
-  try {
-    const raw = await fs.readFile(STORE_PATH, "utf8");
-    const parsed = JSON.parse(raw) as SignInStore;
-    return {
-      users: parsed.users || {},
-      events: Array.isArray(parsed.events) ? parsed.events : [],
-    };
-  } catch {
-    return { users: {}, events: [] };
-  }
-}
-
-async function writeStore(store: SignInStore): Promise<void> {
-  await fs.mkdir(path.dirname(STORE_PATH), { recursive: true });
-  await fs.writeFile(STORE_PATH, JSON.stringify(store, null, 2), "utf8");
-}
-
 export async function recordGoogleContinue(user: {
   id: string;
   email: string;
   name: string;
   picture?: string;
 }): Promise<SignInUser> {
-  const store = await ensureStore();
+  return recordSignIn(user);
+}
+
+export async function recordSignIn(user: {
+  id: string;
+  email: string;
+  name: string;
+  picture?: string;
+}): Promise<SignInUser> {
+  const supabase = createServiceClient();
   const now = new Date().toISOString();
   const email = user.email.trim().toLowerCase();
   const key = user.id || email;
-  const existing = store.users[key];
+
+  const { data: existing } = await supabase
+    .from("signin_users")
+    .select("*")
+    .eq("id", key)
+    .maybeSingle();
 
   const nextUser: SignInUser = existing
     ? {
-        ...existing,
+        id: key,
+        email,
         name: user.name || existing.name,
-        picture: user.picture || existing.picture,
+        picture: user.picture || existing.picture || "",
+        firstSeenAt: existing.first_seen_at,
         lastSeenAt: now,
-        continueCount: existing.continueCount + 1,
+        continueCount: (existing.continue_count || 0) + 1,
       }
     : {
         id: key,
@@ -74,35 +64,63 @@ export async function recordGoogleContinue(user: {
         continueCount: 1,
       };
 
-  store.users[key] = nextUser;
-  store.events.unshift({
+  await supabase.from("signin_users").upsert({
+    id: nextUser.id,
+    email: nextUser.email,
+    name: nextUser.name,
+    picture: nextUser.picture,
+    first_seen_at: nextUser.firstSeenAt,
+    last_seen_at: nextUser.lastSeenAt,
+    continue_count: nextUser.continueCount,
+  });
+
+  await supabase.from("signin_events").insert({
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    userId: key,
+    user_id: key,
     email,
     name: nextUser.name,
     at: now,
   });
 
-  // Keep the event log bounded
-  if (store.events.length > 2000) {
-    store.events = store.events.slice(0, 2000);
-  }
-
-  await writeStore(store);
   return nextUser;
 }
 
 export async function getSignInAnalytics() {
-  const store = await ensureStore();
-  const users = Object.values(store.users).sort(
-    (a, b) => new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime()
-  );
+  const supabase = createServiceClient();
+
+  const { data: userRows } = await supabase.from("signin_users").select("*");
+  const { data: eventRows } = await supabase
+    .from("signin_events")
+    .select("*")
+    .order("at", { ascending: false })
+    .limit(2000);
+
+  const users: SignInUser[] = (userRows || [])
+    .map((u) => ({
+      id: u.id,
+      email: u.email,
+      name: u.name,
+      picture: u.picture || "",
+      firstSeenAt: u.first_seen_at,
+      lastSeenAt: u.last_seen_at,
+      continueCount: u.continue_count || 0,
+    }))
+    .sort(
+      (a, b) =>
+        new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime()
+    );
+
+  const events: SignInEvent[] = (eventRows || []).map((e) => ({
+    id: e.id,
+    userId: e.user_id,
+    email: e.email,
+    name: e.name,
+    at: e.at,
+  }));
 
   const totalContinues = users.reduce((sum, u) => sum + u.continueCount, 0);
-  const uniqueUsers = users.length;
-
   const byDay: Record<string, number> = {};
-  for (const event of store.events) {
+  for (const event of events) {
     const day = event.at.slice(0, 10);
     byDay[day] = (byDay[day] || 0) + 1;
   }
@@ -115,10 +133,10 @@ export async function getSignInAnalytics() {
   });
 
   return {
-    uniqueUsers,
+    uniqueUsers: users.length,
     totalContinues,
     last7Days,
-    recentEvents: store.events.slice(0, 50),
+    recentEvents: events.slice(0, 50),
     users,
   };
 }

@@ -14,10 +14,11 @@
     "index:moe-corpus:math": "tsx scripts/index_moe_books.ts --subject=math"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.12.5",
+    "@supabase/supabase-js": "^2.115.0",
     "clsx": "^2.1.1",
     "framer-motion": "^12.6.3",
     "geist": "^1.7.2",
-    "jose": "^6.2.10",
     "lucide-react": "^0.487.0",
     "next": "^15.2.4",
     "pdfjs-dist": "^4.10.38",

@@ -1,8 +1,7 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
 import { SUBJECT_CATALOG, type GradeLevel } from "@/data/curriculum";
 import { topicToSlug } from "@/data/lessons/utils";
 import { normalizeEmail } from "@/lib/auth-server";
+import { createServiceClient } from "@/lib/supabase/server";
 import type {
   AssignmentCompletion,
   AssignmentType,
@@ -19,8 +18,6 @@ import type {
 } from "@/lib/classroom-types";
 
 export type { StudentAssignmentView };
-
-const STORE_PATH = path.join(process.cwd(), "data", "classrooms.json");
 
 /** Serialize read-modify-write so concurrent progress sync / class edits cannot wipe each other. */
 let storeQueue: Promise<unknown> = Promise.resolve();
@@ -45,38 +42,190 @@ function emptyStore(): ClassroomStore {
   };
 }
 
-function normalizeStore(parsed: Partial<ClassroomStore>): ClassroomStore {
-  return {
-    teachers: parsed.teachers || {},
-    classes: parsed.classes || {},
-    memberships: Array.isArray(parsed.memberships) ? parsed.memberships : [],
-    assignments: Array.isArray(parsed.assignments) ? parsed.assignments : [],
-    completions: Array.isArray(parsed.completions) ? parsed.completions : [],
-    progress: parsed.progress || {},
-  };
-}
-
 export async function loadClassroomStore(): Promise<ClassroomStore> {
-  try {
-    const raw = await fs.readFile(STORE_PATH, "utf8");
-    const parsed = JSON.parse(raw) as Partial<ClassroomStore>;
-    return normalizeStore(parsed);
-  } catch {
-    return emptyStore();
+  const supabase = createServiceClient();
+  const store = emptyStore();
+
+  const [
+    teachersRes,
+    classesRes,
+    membershipsRes,
+    assignmentsRes,
+    completionsRes,
+    progressRes,
+  ] = await Promise.all([
+    supabase.from("teacher_grants").select("*"),
+    supabase.from("classes").select("*"),
+    supabase.from("class_memberships").select("*"),
+    supabase.from("assignments").select("*"),
+    supabase.from("assignment_completions").select("*"),
+    supabase.from("student_progress").select("*"),
+  ]);
+
+  for (const t of teachersRes.data || []) {
+    store.teachers[t.email] = {
+      email: t.email,
+      grantedAt: t.granted_at,
+      source: t.source,
+      grantedBy: t.granted_by || undefined,
+    };
   }
+
+  for (const c of classesRes.data || []) {
+    store.classes[c.class_id] = {
+      classId: c.class_id,
+      name: c.name,
+      grade: c.grade,
+      subjectIds: c.subject_ids || [],
+      joinCode: c.join_code,
+      teacherId: c.teacher_id,
+      teacherEmail: c.teacher_email,
+      teacherName: c.teacher_name || "",
+      createdAt: c.created_at,
+    };
+  }
+
+  store.memberships = (membershipsRes.data || []).map((m) => ({
+    studentId: m.student_id,
+    studentEmail: m.student_email,
+    studentName: m.student_name || "",
+    classId: m.class_id,
+    joinedAt: m.joined_at,
+  }));
+
+  store.assignments = (assignmentsRes.data || []).map((a) => ({
+    id: a.id,
+    classId: a.class_id,
+    type: a.type,
+    subjectId: a.subject_id,
+    topic: a.topic,
+    topicSlug: a.topic_slug,
+    dueDate: a.due_date,
+    createdAt: a.created_at,
+    createdBy: a.created_by,
+  }));
+
+  store.completions = (completionsRes.data || []).map((c) => ({
+    assignmentId: c.assignment_id,
+    studentId: c.student_id,
+    completedAt: c.completed_at,
+  }));
+
+  for (const p of progressRes.data || []) {
+    store.progress[p.student_id] = {
+      studentId: p.student_id,
+      studentEmail: p.student_email,
+      studentName: p.student_name || "",
+      updatedAt: p.updated_at,
+      lastActiveAt: p.last_active_at,
+      topics: (p.topics || {}) as Record<string, TopicSnapshot>,
+      examFocusGrade: p.exam_focus_grade,
+      recentExamAccuracy:
+        p.recent_exam_accuracy == null ? null : Number(p.recent_exam_accuracy),
+    };
+  }
+
+  return store;
 }
 
 async function writeStore(store: ClassroomStore): Promise<void> {
-  await fs.mkdir(path.dirname(STORE_PATH), { recursive: true });
-  const payload = JSON.stringify(store, null, 2);
-  const tmp = `${STORE_PATH}.${process.pid}.${Date.now()}.tmp`;
-  await fs.writeFile(tmp, payload, "utf8");
-  try {
-    await fs.rename(tmp, STORE_PATH);
-  } catch {
-    // Windows: rename over existing file can fail — fall back to replace.
-    await fs.copyFile(tmp, STORE_PATH);
-    await fs.unlink(tmp).catch(() => undefined);
+  const supabase = createServiceClient();
+
+  const teacherRows = Object.values(store.teachers).map((t) => ({
+    email: t.email,
+    granted_at: t.grantedAt,
+    source: t.source,
+    granted_by: t.grantedBy || null,
+  }));
+
+  const classRows = Object.values(store.classes).map((c) => ({
+    class_id: c.classId,
+    name: c.name,
+    grade: c.grade,
+    subject_ids: c.subjectIds,
+    join_code: c.joinCode,
+    teacher_id: c.teacherId,
+    teacher_email: c.teacherEmail,
+    teacher_name: c.teacherName,
+    created_at: c.createdAt,
+  }));
+
+  const membershipRows = store.memberships.map((m) => ({
+    student_id: m.studentId,
+    class_id: m.classId,
+    student_email: m.studentEmail,
+    student_name: m.studentName,
+    joined_at: m.joinedAt,
+  }));
+
+  const assignmentRows = store.assignments.map((a) => ({
+    id: a.id,
+    class_id: a.classId,
+    type: a.type,
+    subject_id: a.subjectId,
+    topic: a.topic,
+    topic_slug: a.topicSlug,
+    due_date: a.dueDate,
+    created_at: a.createdAt,
+    created_by: a.createdBy,
+  }));
+
+  const completionRows = store.completions.map((c) => ({
+    assignment_id: c.assignmentId,
+    student_id: c.studentId,
+    completed_at: c.completedAt,
+  }));
+
+  const progressRows = Object.values(store.progress).map((p) => ({
+    student_id: p.studentId,
+    student_email: p.studentEmail,
+    student_name: p.studentName,
+    updated_at: p.updatedAt,
+    last_active_at: p.lastActiveAt,
+    topics: p.topics,
+    exam_focus_grade: p.examFocusGrade,
+    recent_exam_accuracy: p.recentExamAccuracy ?? null,
+  }));
+
+  // Replace-snapshot: clear then upsert (service role bypasses RLS)
+  await Promise.all([
+    supabase.from("assignment_completions").delete().neq("student_id", ""),
+    supabase.from("assignments").delete().neq("id", ""),
+    supabase.from("class_memberships").delete().neq("student_id", ""),
+    supabase.from("classes").delete().neq("class_id", ""),
+    supabase.from("teacher_grants").delete().neq("email", ""),
+    supabase.from("student_progress").delete().neq("student_id", ""),
+  ]);
+
+  if (teacherRows.length) {
+    const { error } = await supabase.from("teacher_grants").insert(teacherRows);
+    if (error) throw new Error(error.message);
+  }
+  if (classRows.length) {
+    const { error } = await supabase.from("classes").insert(classRows);
+    if (error) throw new Error(error.message);
+  }
+  if (membershipRows.length) {
+    const { error } = await supabase
+      .from("class_memberships")
+      .insert(membershipRows);
+    if (error) throw new Error(error.message);
+  }
+  if (assignmentRows.length) {
+    const { error } = await supabase.from("assignments").insert(assignmentRows);
+    if (error) throw new Error(error.message);
+  }
+  if (completionRows.length) {
+    const { error } = await supabase
+      .from("assignment_completions")
+      .insert(completionRows);
+    if (error) throw new Error(error.message);
+  }
+  if (progressRows.length) {
+    const { error } = await supabase
+      .from("student_progress")
+      .insert(progressRows);
+    if (error) throw new Error(error.message);
   }
 }
 

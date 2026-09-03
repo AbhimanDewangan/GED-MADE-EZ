@@ -108,7 +108,7 @@ export default function AdminAnalyticsPage() {
       <AppHeader
         title="Super Admin"
         highlight="analytics"
-        subtitle="Google Continue with Google usage across GED MADE EZ."
+        subtitle="Sign-in analytics across GED MADE EZ (Supabase Auth)."
         showGreeting={false}
       />
 
@@ -178,9 +178,9 @@ export default function AdminAnalyticsPage() {
             <Card>
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs text-muted">Unique Google users</p>
+                  <p className="text-xs text-muted">Unique users</p>
                   <p className="mt-1 text-3xl font-bold text-white">{data.uniqueUsers}</p>
-                  <p className="mt-1 text-xs text-muted">People who continued with Google</p>
+                  <p className="mt-1 text-xs text-muted">People who signed in</p>
                 </div>
                 <Users className="h-6 w-6 text-indigo-400" />
               </div>
@@ -188,9 +188,9 @@ export default function AdminAnalyticsPage() {
             <Card>
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs text-muted">Total continues</p>
+                  <p className="text-xs text-muted">Total sign-ins</p>
                   <p className="mt-1 text-3xl font-bold text-white">{data.totalContinues}</p>
-                  <p className="mt-1 text-xs text-muted">All Continue with Google completions</p>
+                  <p className="mt-1 text-xs text-muted">All successful sign-in events</p>
                 </div>
                 <MousePointerClick className="h-6 w-6 text-emerald-400" />
               </div>

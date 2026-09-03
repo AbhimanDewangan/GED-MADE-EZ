@@ -240,7 +240,7 @@ export function CTASection() {
             Get started free
           </Link>
           <Link href="/auth/signin" className="lp-btn lp-btn-secondary">
-            Sign in with Google
+            Sign in
           </Link>
         </div>
         <div className="lp-trust">
