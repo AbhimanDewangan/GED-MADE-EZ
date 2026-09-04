@@ -119,22 +119,42 @@ export async function getSignInAnalytics() {
   }));
 
   const totalContinues = users.reduce((sum, u) => sum + u.continueCount, 0);
-  const byDay: Record<string, number> = {};
+  const signInsByDay: Record<string, number> = {};
   for (const event of events) {
     const day = event.at.slice(0, 10);
-    byDay[day] = (byDay[day] || 0) + 1;
+    signInsByDay[day] = (signInsByDay[day] || 0) + 1;
+  }
+
+  const registrationsByDay: Record<string, number> = {};
+  for (const user of users) {
+    const day = user.firstSeenAt.slice(0, 10);
+    registrationsByDay[day] = (registrationsByDay[day] || 0) + 1;
   }
 
   const last7Days = Array.from({ length: 7 }, (_, i) => {
     const d = new Date();
     d.setDate(d.getDate() - (6 - i));
     const key = d.toISOString().slice(0, 10);
-    return { date: key, continues: byDay[key] || 0 };
+    return {
+      date: key,
+      continues: signInsByDay[key] || 0,
+      signIns: signInsByDay[key] || 0,
+      registrations: registrationsByDay[key] || 0,
+    };
   });
+
+  const registeredLast7Days = last7Days.reduce(
+    (sum, day) => sum + day.registrations,
+    0
+  );
+  const signInsLast7Days = last7Days.reduce((sum, day) => sum + day.signIns, 0);
 
   return {
     uniqueUsers: users.length,
     totalContinues,
+    totalSignIns: totalContinues,
+    registeredLast7Days,
+    signInsLast7Days,
     last7Days,
     recentEvents: events.slice(0, 50),
     users,

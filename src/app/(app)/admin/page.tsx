@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import {
   Bar,
   BarChart,
+  CartesianGrid,
+  Legend,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -15,12 +17,27 @@ import { Badge, Button, Card } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 import { getToken } from "@/lib/auth-storage";
 import { apiUrl } from "@/lib/api";
-import { Loader2, Shield, Users, MousePointerClick } from "lucide-react";
+import {
+  Loader2,
+  Shield,
+  Users,
+  MousePointerClick,
+  UserPlus,
+  Activity,
+} from "lucide-react";
 
 type AnalyticsPayload = {
   uniqueUsers: number;
   totalContinues: number;
-  last7Days: { date: string; continues: number }[];
+  totalSignIns?: number;
+  registeredLast7Days?: number;
+  signInsLast7Days?: number;
+  last7Days: {
+    date: string;
+    continues: number;
+    signIns?: number;
+    registrations?: number;
+  }[];
   recentEvents: {
     id: string;
     email: string;
@@ -174,13 +191,13 @@ export default function AdminAnalyticsPage() {
 
       {data && (
         <>
-          <div className="mb-8 grid gap-4 sm:grid-cols-2">
+          <div className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <Card>
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs text-muted">Unique users</p>
+                  <p className="text-xs text-muted">Registered users</p>
                   <p className="mt-1 text-3xl font-bold text-white">{data.uniqueUsers}</p>
-                  <p className="mt-1 text-xs text-muted">People who signed in</p>
+                  <p className="mt-1 text-xs text-muted">Unique accounts seen</p>
                 </div>
                 <Users className="h-6 w-6 text-indigo-400" />
               </div>
@@ -189,19 +206,54 @@ export default function AdminAnalyticsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-xs text-muted">Total sign-ins</p>
-                  <p className="mt-1 text-3xl font-bold text-white">{data.totalContinues}</p>
-                  <p className="mt-1 text-xs text-muted">All successful sign-in events</p>
+                  <p className="mt-1 text-3xl font-bold text-white">
+                    {data.totalSignIns ?? data.totalContinues}
+                  </p>
+                  <p className="mt-1 text-xs text-muted">All successful logins</p>
                 </div>
                 <MousePointerClick className="h-6 w-6 text-emerald-400" />
+              </div>
+            </Card>
+            <Card>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-muted">New (7 days)</p>
+                  <p className="mt-1 text-3xl font-bold text-white">
+                    {data.registeredLast7Days ?? 0}
+                  </p>
+                  <p className="mt-1 text-xs text-muted">First-time registrations</p>
+                </div>
+                <UserPlus className="h-6 w-6 text-sky-400" />
+              </div>
+            </Card>
+            <Card>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-muted">Sign-ins (7 days)</p>
+                  <p className="mt-1 text-3xl font-bold text-white">
+                    {data.signInsLast7Days ?? 0}
+                  </p>
+                  <p className="mt-1 text-xs text-muted">Logins this week</p>
+                </div>
+                <Activity className="h-6 w-6 text-amber-400" />
               </div>
             </Card>
           </div>
 
           <Card className="mb-8">
-            <h3 className="mb-4 font-semibold text-white">Continues — last 7 days</h3>
-            <div className="h-56">
+            <h3 className="mb-4 font-semibold text-white">
+              Sign-ins vs registrations — last 7 days
+            </h3>
+            <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={data.last7Days}>
+                <BarChart
+                  data={data.last7Days.map((d) => ({
+                    ...d,
+                    signIns: d.signIns ?? d.continues,
+                    registrations: d.registrations ?? 0,
+                  }))}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
                   <XAxis
                     dataKey="date"
                     tick={{ fill: "#8b95a8", fontSize: 11 }}
@@ -222,7 +274,19 @@ export default function AdminAnalyticsPage() {
                       borderRadius: 12,
                     }}
                   />
-                  <Bar dataKey="continues" fill="#6366f1" radius={[8, 8, 0, 0]} />
+                  <Legend />
+                  <Bar
+                    dataKey="signIns"
+                    name="Sign-ins"
+                    fill="#6366f1"
+                    radius={[8, 8, 0, 0]}
+                  />
+                  <Bar
+                    dataKey="registrations"
+                    name="Registrations"
+                    fill="#34d399"
+                    radius={[8, 8, 0, 0]}
+                  />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -236,7 +300,7 @@ export default function AdminAnalyticsPage() {
               </div>
               <div className="max-h-96 space-y-3 overflow-y-auto scrollbar-thin">
                 {data.users.length === 0 && (
-                  <p className="text-sm text-muted">No Google continues recorded yet.</p>
+                  <p className="text-sm text-muted">No sign-ins recorded yet.</p>
                 )}
                 {data.users.map((u) => (
                   <div
@@ -247,7 +311,8 @@ export default function AdminAnalyticsPage() {
                       <p className="truncate text-sm font-medium text-white">{u.name}</p>
                       <p className="truncate text-xs text-muted">{u.email}</p>
                       <p className="mt-1 text-[10px] text-muted">
-                        First: {formatWhen(u.firstSeenAt)}
+                        Registered: {formatWhen(u.firstSeenAt)} · Last:{" "}
+                        {formatWhen(u.lastSeenAt)}
                       </p>
                     </div>
                     <Badge>{u.continueCount}×</Badge>
@@ -258,7 +323,7 @@ export default function AdminAnalyticsPage() {
 
             <Card>
               <div className="mb-4 flex items-center justify-between">
-                <h3 className="font-semibold text-white">Recent continues</h3>
+                <h3 className="font-semibold text-white">Recent sign-ins</h3>
                 <Badge variant="success">live</Badge>
               </div>
               <div className="max-h-96 space-y-3 overflow-y-auto scrollbar-thin">
